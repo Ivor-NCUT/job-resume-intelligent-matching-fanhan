@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Job Resume Match Output",
+  "type": "object",
+  "required": ["algorithm_version", "matches"],
+  "properties": {
+    "algorithm_version": {"type": "string"},
+    "top_n": {"type": "integer"},
+    "matches": {"type": "array", "items": {"type": "object", "required": ["candidate_id", "job_id", "score", "recommendation_level", "candidate_type", "job_type", "compatibility", "match_reason", "risk_reason"], "properties": {"candidate_id": {"type": ["string", "null"]}, "candidate_name": {"type": ["string", "null"]}, "job_id": {"type": ["string", "null"]}, "job_title": {"type": ["string", "null"]}, "rank": {"type": "integer"}, "score": {"type": "integer"}, "recommendation_level": {"type": "string"}, "candidate_type": {"type": "string"}, "job_type": {"type": "string"}, "compatibility": {"type": "string"}, "keyword_score": {"type": "integer"}, "semantic_score": {"type": "integer"}, "rule_score": {"type": "integer"}, "llm_review_score": {"type": "integer"}, "matched_terms": {"type": "array", "items": {"type": "string"}}, "match_reason": {"type": "array", "items": {"type": "string"}}, "risk_reason": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": true}}
+  }
+}

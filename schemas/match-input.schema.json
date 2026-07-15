@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Job Resume Match Input",
+  "type": "object",
+  "required": ["candidates", "jobs"],
+  "properties": {
+    "top_n": {"type": "integer", "minimum": 1, "default": 5},
+    "candidates": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "engagement": {"type": "string"}, "实习 & 正职": {"type": "string"}, "profile_text": {"type": "string"}, "resume_text": {"type": "string"}, "portfolio_text": {"type": "string"}, "links": {"type": ["array", "string"]}, "skills": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": true}},
+    "jobs": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "岗位名称": {"type": "string"}, "description": {"type": "string"}, "requirements": {"type": "string"}, "must_have": {"type": "string"}, "nice_to_have": {"type": "string"}, "skills": {"type": "array", "items": {"type": "string"}}, "attributes": {"type": "object"}}, "additionalProperties": true}}
+  }
+}
