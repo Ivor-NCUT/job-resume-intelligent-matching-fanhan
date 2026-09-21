@@ -1,6 +1,6 @@
 ---
 name: job-resume-intelligent-matching-fanhan
-description: Use this skill whenever the user wants to match jobs/JDs/岗位 with resumes/候选人/作品集/个人网站/GitHub/社媒链接, including “上传简历找岗位”, “上传 JD 找候选人”, “跑岗位候选人匹配”, “飞书多维表格匹配”, or feedback like “这个匹配不准”. This skill performs no model training; it uses Agent tools, structured extraction, retrieval, hard-condition checks, the candidate `实习 & 正职` field, evidence-based scoring, LLM review, and Darwin-style feedback iteration.
+description: Use this skill whenever the user wants to match jobs/JDs/岗位 with resumes/候选人/作品集/个人网站/GitHub/社媒链接, including “上传简历找岗位”, “上传 JD 找候选人”, “跑岗位候选人匹配”, “飞书多维表格匹配”, or feedback like “这个匹配不准”. Candidate-to-job runs return a short copy-ready Feishu text message for forwarding to the candidate; JD-to-candidate runs classify the role, rank every same-category resume JSON, select up to five candidates, and deliver their original resumes to the target Feishu group.
 ---
 
 # 职位 & 简历智能匹配
@@ -16,30 +16,106 @@ Use this skill to run bidirectional recruiting matching without changing model w
    - Feedback: user says a recommendation is wrong, asks the skill to improve, or points out a recurring mismatch.
 2. If the user already provided enough data and asked to run, execute directly. Do not ask for repeated confirmation.
 3. If writing back to a live database, show the affected table/field list once before the first write unless the user has explicitly authorized the write in the same turn.
+4. When a JD arrives in a Feishu group, use that group as the delivery target. Otherwise require an explicit target chat before sending; matching can proceed while the destination is unresolved.
+5. When an intern invokes local Codex from Feishu, treat the normal agent reply as the delivery channel. Do not send a duplicate message to the same group through `lark-cli` unless the user explicitly asks.
 
 ## Core Algorithm
 
 Run these phases in order.
 
 1. Normalize inputs.
-   - Candidate fields: name, resume text, portfolio text, links, skills, experience, education, location, availability, expected role, `实习 & 正职`.
+   - Candidate fields: name, all parsed material text, original files, original links, skills, experience, education, location, availability, expected role, `实习 & 正职`.
+   - Treat PDF, Word, HTML, ZIP/project files, personal websites, Feishu documents, GitHub repositories, social links, and email text as candidate evidence when present.
+   - Match against extracted content from every material version, not only the current PDF or filename. Preserve each original file/link for delivery.
    - Job fields: title, company, JD text, must-have requirements, nice-to-have requirements, location, seniority, job type, hiring status.
    - Preserve source evidence snippets. Never invent missing facts.
-2. Infer engagement type.
+2. Classify the JD and build the candidate pool.
+   - Use the canonical category values in `Role Category Gate`.
+   - If the JD is an existing job record, prefer its `职位分类`; otherwise infer the category from the full JD. A JD may have more than one category only when its responsibilities materially span them.
+   - Load every candidate whose `候选人职位类目` intersects the JD category. Do not retrieve a cross-category semantic shortlist first.
+   - For each same-category candidate, parse the resume JSON using the field precedence in `Feishu Base source`. Exclude rows without readable JSON from scoring and report their count.
+3. Infer engagement type.
    - Candidate type comes first from `实习 & 正职`.
    - Job type comes from job title, JD, explicit tags, and requirements.
    - Use the compatibility matrix below before semantic ranking.
-3. Hard-condition gate.
+4. Hard-condition gate.
    - Check job type, location, seniority, work authorization if present, availability, language, required domain, and required technical stack.
    - A failed hard condition can still be shown only as “备选/风险较高” when the user asks for broad exploration.
-4. Retrieval and scoring.
+5. Retrieval and scoring.
    - Keyword score: exact skills, domain terms, role terms, tool names, product names.
    - Semantic score: summarize candidate and job as comparable work evidence; compare responsibilities and outcomes.
    - Rule score: hard-condition fit, engagement type fit, seniority fit, recency, portfolio strength, and requirement coverage.
-   - LLM review: ask the model to compare the top candidates/jobs only, with evidence and risks.
-5. Output.
+   - Score every readable JSON in the same-category pool, then sort all results by final score. Use the LLM only to review the leading results and resolve close evidence-based comparisons; never let it introduce an out-of-category candidate.
+6. Output and delivery.
    - Return ranked matches with `推荐等级`, `匹配理由`, `风险理由`, `证据引用`, and `下一步建议`.
-   - For Feishu Base or SQLite, write the same fields into the match result table when authorized.
+   - For candidate-to-jobs, keep the recruiter-facing assessment separate from the candidate-facing copy. The latter must follow `Candidate Copy In Feishu` and be directly pasteable as one message.
+   - When the user requests delivery, send the original file format (including HTML or ZIP) and include the original webpage, Feishu document, GitHub, or social link. A link-only candidate is valid when its extracted text supports the match.
+   - Select `min(5, eligible_count)` candidates. Never pad the list with another category. If fewer than five survive, state why.
+   - Send one ranking summary followed by each selected candidate's original resume to the target Feishu group. Delivery does not imply Base writeback.
+
+## Candidate Copy In Feishu
+
+This section is mandatory for `candidate_to_jobs`. After the internal ranking, produce one candidate-facing plain-text message that the operator can copy in full and send to the candidate without editing.
+
+### Feishu delivery contract
+
+- When invoked through Feishu or a Feishu Bridge, the default visible reply is only the candidate-facing text. Do not mix in scores, completion status, database notes, or a `给实习生复制` label; the intern should be able to copy the entire message bubble.
+- Preserve short paragraphs and blank lines as plain text. Do not use Markdown headings, code fences, quote blocks, rich posts, cards, tables, or buttons.
+- The Bridge normally relays the agent response back to the source chat. Return the text normally; do not call `im +messages-send` to echo it into the same chat.
+- If the user explicitly asks to send the copy to another Feishu chat, confirm the target and identity, then use `im +messages-send --text` so line breaks remain unchanged. Do not use `--markdown` for this copy.
+- Show the internal assessment in Feishu only when explicitly requested, and keep it in a separate message from the copy-ready text.
+
+### Content contract
+
+- Turn every final selected JD into a short choice, not a pasted JD. Default to the top five; if more must be delivered, split them into copyable messages of at most five jobs each.
+- Keep each job to at most three short lines and the whole five-job message within roughly 1,200 Chinese characters.
+- For each job include only: `岗位｜公司`, confirmed location/work mode and compensation when available, one sentence on what the role mainly does, one evidence-backed sentence on why it fits this candidate, and at most one decision-critical point to confirm.
+- Translate internal `风险理由` into neutral candidate language such as `需要确认：上海线下办公，想先确认您是否考虑`。Omit low-value gaps instead of making the candidate read an audit report.
+- End with one low-effort action: ask the candidate to reply with job numbers; promise the full JD/company details only for the selected numbers.
+- Use natural one-to-one Chinese. Use `老师` only when the existing relationship already uses it.
+
+### Never expose in candidate copy
+
+- Scores, ranking labels, JD IDs, retrieval counts, model names, database/writeback status, `Top5`, `风险`, or internal evidence language.
+- Full responsibilities, requirements, company introduction, or application homework for every job. Those belong in the follow-up after the candidate chooses.
+- `把简历发我` or any request to resend materials already received.
+- Unverified salary, location, financing, company claims, or exaggerated fit.
+- Markdown tables, quote blocks, nested lists, or five repeated greetings and closings.
+
+### Copy-ready template
+
+```text
+{候选人称呼}您好，我结合您的经历筛了几个目前在招、匹配度比较高的机会，先把简版发您。您看看哪些值得进一步了解：
+
+1）{岗位}｜{公司}｜{地点/办公方式；已确认的薪酬或职级可继续写在本行，没有就省略}
+主要做：{一句人话说明核心工作}
+比较适合您：{一句候选人经历与岗位的具体连接}{有关键条件时接“；需要确认：...”}
+
+2）{岗位}｜{公司}
+...
+
+您直接回复感兴趣的编号就行，比如“1、3”。我再把对应的完整 JD 和公司信息发您；如果这几个都不合适，也可以告诉我您更看重的方向、地点或薪资，我继续帮您缩小范围。
+```
+
+The candidate text itself is the deliverable. In Feishu, return it without a wrapper label. Outside Feishu, a wrapper label may appear before the text, but recruiter-only analysis must remain outside the copy block.
+
+## Role Category Gate
+
+Use the canonical matching values below; normalize the user's wording and the two tables' option aliases to these values.
+
+| User/JD wording | Canonical category |
+|---|---|
+| 市场、增长、运营、用户运营、内容运营、客户运营 | `增长/运营/市场` |
+| 产品经理、产品运营（以产品职责为主） | `产品` |
+| 工程师、开发、前端、后端、全栈、基础设施 | `研发` |
+| 算法、机器学习、LLM、NLP、CV、推荐 | `算法` |
+| 数据分析、商业分析、数据科学 | `数据` |
+| UI、UX、视觉、交互、产品设计 | `设计` |
+| 商务、销售、BD、渠道 | `商务/销售` |
+| 首席科学家、Chief Scientist | `首席科学家` |
+| 无法归入以上类别 | `其它` |
+
+Category is a pool gate, not a score. A candidate passes when `候选人职位类目` intersects the JD category set. Missing or non-intersecting categories are excluded from this run and counted in the audit summary.
 
 ## Engagement Type Gate
 
@@ -103,15 +179,32 @@ Apply these caps after scoring:
 
 ## Tooling
 
-### Database selection
+### Feishu Base source
 
-When the task uses the local `opportunity_matcher` SQLite database, resolve the database before reading candidates or jobs:
+The default matching database is:
 
-1. If `OPPORTUNITY_MATCHER_DB_FILE` is set, use that exact path.
-2. Otherwise use the current CLI project's `data/opportunity_matcher.db`.
-3. Report the selected path once in the result.
+```text
+https://twoj0037lkv.feishu.cn/base/A80Xb9jOnaexcKswFkacPBoEnAf?table=tblcprcqjXs35bdq&view=vewkVFCtes
+```
 
-Do not silently fall back to a different empty database when the configured database exists. Before matching, verify candidate count, total/open job count, and match-result count. If the selected database has no open jobs, report the data gap instead of fabricating matches.
+Use `lark-cli` with user identity and re-resolve the URL before each run; IDs and field names below are the verified baseline, not permission to assume the live schema never changes.
+
+- Base: `A80Xb9jOnaexcKswFkacPBoEnAf` (`泛函｜公司&职位&候选人`)
+- Jobs: `tblcprcqjXs35bdq` (`岗位`), category field `职位分类`
+- Candidates: `tbldGJk6awx45Chc` (`候选人`), category field `候选人职位类目`
+- Candidate JSON precedence: `候选人检索字段 JSON.文本` -> `候选人检索 JSON（Agent回填）` -> JSON attachment in `候选人检索字段 JSON.附件`
+- Original resume field: `简历`; engagement field: `实习 & 正职`; display name: `姓名 & 昵称`
+
+Read only the necessary fields and continue pagination until `has_more=false`. The Object field `候选人检索字段 JSON` is currently unsupported by OpenAPI; do not treat its omission as an empty candidate library. Parse each JSON value independently, keep the source `record_id`, and report total same-category rows, readable JSON rows, excluded rows, and scored rows.
+
+Do not silently fall back to Workbench, SQLite, CSV, or another Base. If the Base is unavailable or the category pool has no readable JSON, report the gap.
+
+### Feishu group delivery
+
+1. Read `lark-base`, `lark-im`, and `lark-shared` before live execution.
+2. Download only the selected candidates' original attachments with `base +record-download-attachment`, using each candidate `record_id` and the `简历` file token. Keep downloads in a task-specific directory and validate returned size; validate PDF signatures when the file is PDF.
+3. Send the ranking summary with `im +messages-send --markdown`, then send each original resume with `--file` and an idempotency key. Use user identity when it can write to the group; if an external-group policy returns `230027` and the bot is already a member, retry as bot.
+4. Read the target group's recent messages and verify that the summary and all expected file messages are present. A successful upload call alone is not delivery proof.
 
 Use bundled script for deterministic batch checks:
 
@@ -121,7 +214,7 @@ python scripts/run_match.py --input input.json --output matches.json --top-n 5
 
 Read these references only when needed:
 
-- `references/base-field-mapping.md`: Feishu Base and SQLite field mapping.
+- `references/base-field-mapping.md`: verified Feishu Base field mapping and category aliases.
 - `schemas/match-input.schema.json`: expected local input shape.
 - `schemas/match-output.schema.json`: expected output shape.
 
@@ -134,7 +227,7 @@ When the user gives feedback such as “这个结果不准”, “实习生被�
 2. Convert feedback into a failing example.
    - Add or update one eval in `evals/evals.json`.
    - Include minimal candidate/job facts and the expected corrected behavior.
-3. Read `/Users/fanhan/.codex/skills/达尔文skill/SKILL.md`.
+3. Read `skill-evolution-darwin-runner`.
 4. Apply Darwin-style improvement:
    - Evaluate current instructions against failure modes, actionability, checkpoints, and反例清单.
    - Change the smallest useful part of this skill.
@@ -150,6 +243,9 @@ When the user gives feedback such as “这个结果不准”, “实习生被�
 | candidate `实习 & 正职` is empty | mark candidate type `unknown`; lower confidence | ask for clarification only if top result depends on it |
 | JD type cannot be inferred | mark job type `unknown`; lower confidence | inspect job title, requirements, tags, and company notes |
 | resume or portfolio cannot be parsed | use available text and metadata | mark evidence gaps in risk reason |
+| JD category is unclear | classify from the full JD and state the evidence | do not search every category to manufacture results |
+| same-category row has no readable JSON | exclude it from scoring and count it | do not rank on filename alone |
+| fewer than five eligible candidates | send every eligible candidate | do not pad from another category |
 | Feishu write fails | preserve local output JSON or CSV | report exact table, field, and record that failed |
 | LLM review conflicts with hard gate | hard gate wins | include conflict in risk reason |
 
@@ -157,12 +253,16 @@ When the user gives feedback such as “这个结果不准”, “实习生被�
 
 - Do not train, fine-tune, distill, or modify model weights.
 - Do not let semantic similarity override `实习 & 正职` hard mismatch.
+- Do not let semantic similarity override the role-category pool gate.
 - Do not invent portfolio claims, GitHub activity, work dates, education, or availability.
+- Do not require a PDF when readable evidence came from HTML, a webpage, a Feishu document, GitHub, or another original format.
 - Do not hide missing evidence behind confident language.
 - Do not rewrite database schema unless the user asks for a schema migration.
+- Do not rank a partial page as if it were the complete same-category pool.
+- Do not replace a missing top-five resume with a lower-ranked candidate without saying so.
 - Do not write back to a live table after feedback iteration without an explicit writeback authorization.
 
-## Output Template
+## Internal Output Template
 
 For each match:
 
@@ -170,9 +270,16 @@ For each match:
 ### {rank}. {job_or_candidate_name}
 - 推荐等级：强匹配 / 可推荐 / 备选 / 弱匹配
 - 综合分：{score}/100
+- 职位分类：岗位为 {job_categories}，候选人为 {candidate_categories}，类目门控为 pass
 - 实习/正职判断：候选人为 {candidate_type}，岗位为 {job_type}，兼容性为 {compatibility}
 - 匹配理由：{3 concise bullets}
 - 风险理由：{missing or mismatch risks}
 - 证据引用：{source snippets or fields}
 - 下一步建议：{interview question, portfolio check, or manual review action}
+```
+
+After the list, include:
+
+```text
+候选池审计：同类候选人 {category_rows} 人；可读 JSON {readable_json_rows} 人；因 JSON 缺失/损坏排除 {excluded_rows} 人；已评分 {scored_rows} 人；已发送简历 {sent_files}/{selected_count} 份。
 ```

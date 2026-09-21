@@ -14,6 +14,17 @@ INTERN_PATTERNS = [r"实习", r"实习生", r"找实习", r"\bintern(ship)?\b"]
 FULL_TIME_PATTERNS = [r"正职", r"全职", r"正式", r"社招", r"\bfull[- ]?time\b"]
 SENIOR_TITLE_PATTERNS = [r"负责人", r"主管", r"经理", r"总监", r"合伙人", r"\bhead\b", r"\blead\b", r"\bmanager\b", r"\bdirector\b"]
 SKILL_TERMS = ["ai", "agent", "llm", "rag", "python", "typescript", "react", "node", "sql", "数据", "增长", "运营", "销售", "产品", "客户成功", "内容", "小红书", "飞书", "自动化", "mcp", "prompt"]
+CATEGORY_ALIASES = {"数据分析": "数据", "无匹配标签": "其它"}
+CATEGORY_PATTERNS = {
+    "增长/运营/市场": [r"增长", r"市场", r"(?<!产品)运营", r"growth", r"marketing"],
+    "产品": [r"产品经理", r"产品运营", r"product manager", r"\bpm\b"],
+    "算法": [r"算法", r"机器学习", r"深度学习", r"\bllm\b", r"\bnlp\b", r"\bcv\b", r"推荐系统"],
+    "数据": [r"数据分析", r"商业分析", r"数据科学", r"data analyst", r"data scientist"],
+    "设计": [r"设计", r"\bui\b", r"\bux\b"],
+    "商务/销售": [r"商务", r"销售", r"\bbd\b", r"渠道"],
+    "首席科学家": [r"首席科学家", r"chief scientist"],
+}
+ENGINEERING_PATTERNS = [r"前端", r"后端", r"全栈", r"软件工程", r"开发工程", r"基础设施", r"devops", r"\bsre\b", r"客户端", r"服务端"]
 
 
 @dataclass
@@ -27,6 +38,43 @@ class EngagementDecision:
 
 def has_any(patterns: list[str], text: str) -> bool:
     return any(re.search(p, text, flags=re.IGNORECASE) for p in patterns)
+
+
+def normalize_categories(raw: Any) -> list[str]:
+    values = raw if isinstance(raw, list) else [raw]
+    return list(dict.fromkeys(CATEGORY_ALIASES.get(str(value).strip(), str(value).strip()) for value in values if value))
+
+
+def infer_role_categories(text: str) -> list[str]:
+    categories = [name for name, patterns in CATEGORY_PATTERNS.items() if has_any(patterns, text)]
+    if has_any(ENGINEERING_PATTERNS, text) or (not categories and has_any([r"工程师", r"研发", r"开发"], text)):
+        categories.append("研发")
+    return categories or ["其它"]
+
+
+def candidate_categories(candidate: dict[str, Any]) -> list[str]:
+    return normalize_categories(candidate.get("role_categories") or candidate.get("候选人职位类目"))
+
+
+def job_categories(job: dict[str, Any]) -> list[str]:
+    explicit = normalize_categories(job.get("role_categories") or job.get("role_category") or job.get("职位分类"))
+    return explicit or infer_role_categories(build_job_text(job))
+
+
+def resume_json_value(candidate: dict[str, Any]) -> Any:
+    return candidate.get("resume_json") or candidate.get("候选人检索字段 JSON.文本") or candidate.get("候选人检索 JSON（Agent回填）")
+
+
+def has_readable_resume_json(candidate: dict[str, Any]) -> bool:
+    value = resume_json_value(candidate)
+    if isinstance(value, dict):
+        return True
+    if not isinstance(value, str) or not value.strip():
+        return False
+    try:
+        return isinstance(json.loads(value), dict)
+    except json.JSONDecodeError:
+        return False
 
 
 def normalize_candidate_type(raw: str | None) -> str:
@@ -129,7 +177,18 @@ def recommendation_level(score: int, decision: EngagementDecision) -> str:
 
 
 def build_candidate_text(candidate: dict[str, Any]) -> str:
-    fields = [candidate.get("profile_text"), candidate.get("resume_text"), candidate.get("portfolio_text"), candidate.get("summary"), " ".join(candidate.get("skills", []) or [])]
+    links = candidate.get("links", []) or []
+    if isinstance(links, str):
+        links = [links]
+    fields = [
+        candidate.get("profile_text"),
+        candidate.get("resume_text"),
+        candidate.get("portfolio_text"),
+        candidate.get("summary"),
+        " ".join(candidate.get("skills", []) or []),
+        " ".join(links),
+        json.dumps(resume_json_value(candidate), ensure_ascii=False) if isinstance(resume_json_value(candidate), dict) else resume_json_value(candidate),
+    ]
     return " ".join(str(v) for v in fields if v)
 
 
@@ -163,6 +222,8 @@ def match_one(candidate: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
         "candidate_type": decision.candidate_type,
         "job_type": decision.job_type,
         "compatibility": decision.compatibility,
+        "candidate_categories": candidate_categories(candidate),
+        "job_categories": job_categories(job),
         "keyword_score": kw,
         "semantic_score": semantic,
         "rule_score": rules,
@@ -178,14 +239,39 @@ def match_one(candidate: dict[str, Any], job: dict[str, Any]) -> dict[str, Any]:
 
 def run(data: dict[str, Any]) -> dict[str, Any]:
     top_n = int(data.get("top_n") or 5)
+    direction = data.get("direction") or "candidate_to_jobs"
     rows = []
+    audits = []
+    if direction == "job_to_candidates":
+        for job in data.get("jobs", []):
+            wanted = set(job_categories(job))
+            category_pool = [candidate for candidate in data.get("candidates", []) if wanted.intersection(candidate_categories(candidate))]
+            readable = [candidate for candidate in category_pool if has_readable_resume_json(candidate)]
+            matches = [match_one(candidate, job) for candidate in readable]
+            eligible = [match for match in matches if match["compatibility"] != "mismatch"]
+            eligible.sort(key=lambda item: (-item["score"], str(item.get("candidate_id") or "")))
+            for rank, match in enumerate(eligible[:top_n], 1):
+                match["rank"] = rank
+                rows.append(match)
+            audits.append({
+                "job_id": job.get("id"),
+                "job_categories": sorted(wanted),
+                "category_rows": len(category_pool),
+                "readable_json_rows": len(readable),
+                "json_excluded_rows": len(category_pool) - len(readable),
+                "hard_gate_excluded_rows": len(matches) - len(eligible),
+                "scored_rows": len(matches),
+                "selected_count": min(top_n, len(eligible)),
+            })
+        return {"algorithm_version": "agentic-matching-lite-v0.3-category-gate", "direction": direction, "top_n": top_n, "pool_audit": audits, "matches": rows}
+
     for candidate in data.get("candidates", []):
         matches = [match_one(candidate, job) for job in data.get("jobs", [])]
         matches.sort(key=lambda item: item["score"], reverse=True)
         for rank, match in enumerate(matches[:top_n], 1):
             match["rank"] = rank
             rows.append(match)
-    return {"algorithm_version": "agentic-matching-lite-v0.2-no-training-engagement-gate", "top_n": top_n, "matches": rows}
+    return {"algorithm_version": "agentic-matching-lite-v0.3-category-gate", "direction": direction, "top_n": top_n, "pool_audit": audits, "matches": rows}
 
 
 def main() -> None:

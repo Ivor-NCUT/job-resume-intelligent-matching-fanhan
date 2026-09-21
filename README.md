@@ -5,9 +5,14 @@
 核心规则：
 
 - 不训练、不微调、不蒸馏模型。
+- JD 先归入 Base 的标准职位分类，再只读取该类全部候选人的简历 JSON。
+- 对同类完整候选池排序，最多取前 5 名；不足 5 名不跨类补齐。
 - 候选人表的 `实习 & 正职` 是一等门控字段。
 - 岗位类型从岗位名称和岗位要求推断。
 - 输出必须包含推荐等级、匹配理由、风险理由和证据引用。
+- 用户要求发群时，把排序摘要和前 5 名原始简历发到目标飞书群并回读验收。
+- 候选人找岗位时，内部评分与候选人话术分开；默认输出一段可直接复制到微信的编号选择题，不重复粘贴完整 JD，也不再次索要简历。
+- 实习生从飞书调用本地 Codex 时，默认回复只包含候选人可见的纯文本话术，整条消息可直接复制；不向来源群重复发一遍。
 - 用户反馈会被转成评测样例，再按达尔文式流程迭代能力包。
 
 ## 本地批量匹配
@@ -16,12 +21,14 @@
 python scripts/run_match.py --input input.json --output matches.json --top-n 5
 ```
 
+JD 找候选人时在输入中设置 `"direction": "job_to_candidates"`；候选人找岗位继续使用 `candidate_to_jobs`。
+
 输入结构见 `schemas/match-input.schema.json`，输出结构见 `schemas/match-output.schema.json`。
 
 ## 目录
 
 - `SKILL.md`: Agent 使用说明。
 - `scripts/run_match.py`: 可重复执行的轻量匹配脚本。
-- `references/base-field-mapping.md`: 飞书多维表格和 SQLite 字段映射。
+- `references/base-field-mapping.md`: 已核验的飞书多维表格字段映射。
 - `schemas/`: 输入输出结构说明。
 - `evals/evals.json`: 初始评测用例。

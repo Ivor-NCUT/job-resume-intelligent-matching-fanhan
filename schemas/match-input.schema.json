@@ -4,8 +4,9 @@
   "type": "object",
   "required": ["candidates", "jobs"],
   "properties": {
+    "direction": {"enum": ["candidate_to_jobs", "job_to_candidates"], "default": "candidate_to_jobs"},
     "top_n": {"type": "integer", "minimum": 1, "default": 5},
-    "candidates": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "engagement": {"type": "string"}, "实习 & 正职": {"type": "string"}, "profile_text": {"type": "string"}, "resume_text": {"type": "string"}, "portfolio_text": {"type": "string"}, "links": {"type": ["array", "string"]}, "skills": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": true}},
-    "jobs": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "岗位名称": {"type": "string"}, "description": {"type": "string"}, "requirements": {"type": "string"}, "must_have": {"type": "string"}, "nice_to_have": {"type": "string"}, "skills": {"type": "array", "items": {"type": "string"}}, "attributes": {"type": "object"}}, "additionalProperties": true}}
+    "candidates": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "name": {"type": "string"}, "engagement": {"type": "string"}, "实习 & 正职": {"type": "string"}, "role_categories": {"type": "array", "items": {"type": "string"}}, "候选人职位类目": {"type": ["array", "string"]}, "resume_json": {"type": ["object", "string"]}, "profile_text": {"type": "string"}, "resume_text": {"type": "string"}, "portfolio_text": {"type": "string"}, "links": {"type": ["array", "string"]}, "skills": {"type": "array", "items": {"type": "string"}}}, "additionalProperties": true}},
+    "jobs": {"type": "array", "items": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}, "title": {"type": "string"}, "岗位名称": {"type": "string"}, "role_categories": {"type": "array", "items": {"type": "string"}}, "职位分类": {"type": ["array", "string"]}, "description": {"type": "string"}, "requirements": {"type": "string"}, "must_have": {"type": "string"}, "nice_to_have": {"type": "string"}, "skills": {"type": "array", "items": {"type": "string"}}, "attributes": {"type": "object"}}, "additionalProperties": true}}
   }
 }
