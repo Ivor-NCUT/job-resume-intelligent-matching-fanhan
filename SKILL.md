@@ -1,6 +1,6 @@
 ---
 name: job-resume-intelligent-matching-fanhan
-description: Use this skill whenever the user wants to match jobs/JDs/岗位 with resumes/候选人/作品集/个人网站/GitHub/社媒链接, including “上传简历找岗位”, “上传 JD 找候选人”, “跑岗位候选人匹配”, “飞书多维表格匹配”, or feedback like “这个匹配不准”. Candidate-to-job runs return a short copy-ready Feishu text message for forwarding to the candidate; JD-to-candidate runs classify the role, rank every same-category resume JSON, select up to five candidates, and deliver their original resumes to the target Feishu group.
+description: Use this skill whenever the user wants to match jobs/JDs/岗位 with resumes/候选人/作品集/个人网站/GitHub/社媒链接, including “上传简历找岗位”, “上传 JD 找候选人”, “跑岗位候选人匹配”, “飞书多维表格匹配”, or feedback like “这个匹配不准”. Candidate-to-job runs return a short copy-ready Feishu text message for forwarding to the candidate; JD-to-candidate runs classify the role, rank every same-category resume JSON, select up to five eligible candidates, and deliver concise company-facing recommendations with their original resumes.
 ---
 
 # 职位 & 简历智能匹配
@@ -40,7 +40,7 @@ Run these phases in order.
    - Use the compatibility matrix below before semantic ranking.
 4. Hard-condition gate.
    - Check job type, location, seniority, work authorization if present, availability, language, required domain, and required technical stack.
-   - A failed hard condition can still be shown only as “备选/风险较高” when the user asks for broad exploration.
+   - Exclude explicit must-have failures from the company-facing shortlist. Show them only in a separate internal exploratory list when the user explicitly asks for broad exploration.
 5. Retrieval and scoring.
    - Keyword score: exact skills, domain terms, role terms, tool names, product names.
    - Semantic score: summarize candidate and job as comparable work evidence; compare responsibilities and outcomes.
@@ -49,9 +49,10 @@ Run these phases in order.
 6. Output and delivery.
    - Return ranked matches with `推荐等级`, `匹配理由`, `风险理由`, `证据引用`, and `下一步建议`.
    - For candidate-to-jobs, keep the recruiter-facing assessment separate from the candidate-facing copy. The latter must follow `Candidate Copy In Feishu` and be directly pasteable as one message.
+   - For job-to-candidates, keep the internal assessment separate from the company-facing copy. The latter must follow `Company Copy In Feishu`.
    - When the user requests delivery, send the original file format (including HTML or ZIP) and include the original webpage, Feishu document, GitHub, or social link. A link-only candidate is valid when its extracted text supports the match.
    - Select `min(5, eligible_count)` candidates. Never pad the list with another category. If fewer than five survive, state why.
-   - Send one ranking summary followed by each selected candidate's original resume to the target Feishu group. Delivery does not imply Base writeback.
+   - Freeze the selected names and order before composing or sending. The overview, candidate introductions, and resume files must remain consistent. Delivery does not imply Base writeback.
 
 ## Candidate Copy In Feishu
 
@@ -98,6 +99,47 @@ This section is mandatory for `candidate_to_jobs`. After the internal ranking, p
 ```
 
 The candidate text itself is the deliverable. In Feishu, return it without a wrapper label. Outside Feishu, a wrapper label may appear before the text, but recruiter-only analysis must remain outside the copy block.
+
+## Company Copy In Feishu
+
+This section is mandatory for `job_to_candidates` when results are delivered to a company group. Company-visible messages help the client decide whom to interview; internal scoring and execution logs stay outside the client group.
+
+### Company-visible contract
+
+- Send only candidates who pass the role category and explicit hard conditions. Never add a weak candidate merely to reach five; say `本轮暂无达到推荐线的候选人` when none qualify.
+- For each candidate use at most three short lines: `姓名｜当前角色/年限/地点`, `值得看：` one or two verified facts, and optional `需要确认：` one decision-critical gap.
+- Do not expose scores, ranking labels, JD IDs, retrieval counts, model names, database/writeback status, audit summaries, or `Top5`. Do not repeat the full JD or use the label `风险`.
+- Send each candidate introduction immediately before that candidate's original resume. Use a readable filename such as `{job}-{rank}-{candidate}.{ext}`; do not send duplicate copies or hash-heavy names.
+- Close once with: `如果觉得哪位候选人比较合适，可以直接 @情情，我们的实习生会帮忙联系候选人并推进约面。` Resolve and use 情情's real Feishu mention when available; do not guess an open ID.
+
+### One JD in the group
+
+1. Send one short header naming the role and the number of eligible candidates. State that the list was not padded when fewer than five qualify.
+2. Send each concise candidate introduction followed immediately by the matching resume.
+3. Send the closing action sentence once after the last resume.
+
+```text
+已按「{job_title}｜{location}」筛完候选人库。这轮有 {eligible_count} 位达到推荐线，没有为了凑满 5 人加入硬条件不符的人选。
+
+1）{candidate_name}｜{current_role_or_years}｜{location}
+值得看：{one_or_two_verified_facts}
+需要确认：{one_decision_critical_gap}
+```
+
+### Multiple JDs in the group
+
+1. Send one compact overview in the main chat: one line per JD with its eligible count; for zero results, name the main missing hard condition.
+2. Send one standalone header message per JD. Put that JD's candidate introductions and resumes in the header's reply thread with `im +messages-reply --reply-in-thread`; do not dump every resume into the main chat.
+3. Keep each resume in the same thread as its candidate introduction and end the overall delivery with the same `@情情` action sentence.
+
+```text
+本轮共完成 {job_count} 个岗位的候选人筛选：
+1）{job_one}：{eligible_count} 位可推荐
+2）{job_two}：暂无达标人选，主要缺口是 {hard_requirement}
+…
+
+下面按岗位分别发送主消息，候选人介绍和简历都放在对应回复串里，方便按岗位查看。
+```
 
 ## Role Category Gate
 
@@ -203,8 +245,8 @@ Do not silently fall back to Workbench, SQLite, CSV, or another Base. If the Bas
 
 1. Read `lark-base`, `lark-im`, and `lark-shared` before live execution.
 2. Download only the selected candidates' original attachments with `base +record-download-attachment`, using each candidate `record_id` and the `简历` file token. Keep downloads in a task-specific directory and validate returned size; validate PDF signatures when the file is PDF.
-3. Send the ranking summary with `im +messages-send --markdown`, then send each original resume with `--file` and an idempotency key. Use user identity when it can write to the group; if an external-group policy returns `230027` and the bot is already a member, retry as bot.
-4. Read the target group's recent messages and verify that the summary and all expected file messages are present. A successful upload call alone is not delivery proof.
+3. Follow `Company Copy In Feishu`: use the main chat for one-JD delivery; for multiple JDs, create one header per JD and use `im +messages-reply --reply-in-thread` for its candidate introductions and resume files. Use idempotency keys. Use user identity when it can write to the group; if an external-group policy returns `230027` and the bot is already a member, retry as bot.
+4. Read the target group's recent messages and verify the overview/header structure, candidate-to-resume order, and every expected file. A successful upload call alone is not delivery proof.
 
 Use bundled script for deterministic batch checks:
 
@@ -260,6 +302,8 @@ When the user gives feedback such as “这个结果不准”, “实习生被�
 - Do not rewrite database schema unless the user asks for a schema migration.
 - Do not rank a partial page as if it were the complete same-category pool.
 - Do not replace a missing top-five resume with a lower-ranked candidate without saying so.
+- Do not expose internal matching scores or execution status in company-facing messages.
+- Do not flood the main group with every resume when matching multiple JDs; use one reply thread per JD.
 - Do not write back to a live table after feedback iteration without an explicit writeback authorization.
 
 ## Internal Output Template
