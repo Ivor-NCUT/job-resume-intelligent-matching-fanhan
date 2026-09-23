@@ -1,6 +1,6 @@
 ---
 name: job-resume-intelligent-matching-fanhan
-description: Use this skill whenever the user wants to match jobs/JDs/岗位 with resumes/候选人/作品集/个人网站/GitHub/社媒链接, including “上传简历找岗位”, “上传 JD 找候选人”, “跑岗位候选人匹配”, “飞书多维表格匹配”, or feedback like “这个匹配不准”. Candidate-to-job runs return a short copy-ready Feishu text message for forwarding to the candidate; JD-to-candidate runs classify the role, rank every same-category resume JSON, select up to five eligible candidates, and deliver concise company-facing recommendations with their original resumes.
+description: Use this skill whenever the user wants to match jobs/JDs/岗位 with resumes/候选人/作品集/个人网站/GitHub/社媒链接, including “上传简历找岗位”, “上传 JD 找候选人”, “跑岗位候选人匹配”, “飞书多维表格匹配”, or feedback like “这个匹配不准”. Candidate-to-job runs return a copy-ready plain-text message that fits the Enterprise WeChat 4,000-character limit; JD-to-candidate runs classify the role, rank every same-category resume JSON, select up to five eligible candidates, and deliver concise company-facing recommendations with their original resumes.
 ---
 
 # 职位 & 简历智能匹配
@@ -48,15 +48,15 @@ Run these phases in order.
    - Score every readable JSON in the same-category pool, then sort all results by final score. Use the LLM only to review the leading results and resolve close evidence-based comparisons; never let it introduce an out-of-category candidate.
 6. Output and delivery.
    - Return ranked matches with `推荐等级`, `匹配理由`, `风险理由`, `证据引用`, and `下一步建议`.
-   - For candidate-to-jobs, keep the recruiter-facing assessment separate from the candidate-facing copy. The latter must follow `Candidate Copy In Feishu` and be directly pasteable as one message.
+   - For candidate-to-jobs, keep the recruiter-facing assessment separate from the candidate-facing copy. The latter must follow `Candidate Copy For Enterprise WeChat` and be directly pasteable as one message.
    - For job-to-candidates, keep the internal assessment separate from the company-facing copy. The latter must follow `Company Copy In Feishu`.
    - When the user requests delivery, send the original file format (including HTML or ZIP) and include the original webpage, Feishu document, GitHub, or social link. A link-only candidate is valid when its extracted text supports the match.
    - Select `min(5, eligible_count)` candidates. Never pad the list with another category. If fewer than five survive, state why.
    - Freeze the selected names and order before composing or sending. The overview, candidate introductions, and resume files must remain consistent. Delivery does not imply Base writeback.
 
-## Candidate Copy In Feishu
+## Candidate Copy For Enterprise WeChat
 
-This section is mandatory for `candidate_to_jobs`. After the internal ranking, produce one candidate-facing plain-text message that the operator can copy in full and send to the candidate without editing.
+This section is mandatory for `candidate_to_jobs`. After the internal ranking, produce one candidate-facing plain-text message that the operator can copy from Feishu in full and send through Enterprise WeChat without editing.
 
 ### Feishu delivery contract
 
@@ -69,7 +69,7 @@ This section is mandatory for `candidate_to_jobs`. After the internal ranking, p
 ### Content contract
 
 - Turn every final selected JD into a short choice, not a pasted JD. Default to the top five; if more must be delivered, split them into copyable messages of at most five jobs each.
-- Keep each job to at most three short lines and the whole five-job message within roughly 1,200 Chinese characters.
+- Keep each job to at most three short lines. Target at most 3,500 characters for the complete copy-ready message and never exceed the Enterprise WeChat 4,000-character hard limit. Count the greeting, punctuation, links, spaces, and line breaks; shorten low-value detail before delivery rather than relying on the client to truncate it. Do not pad a naturally shorter message toward 3,500 characters.
 - For each job include only: `岗位｜公司`, confirmed location/work mode and compensation when available, one sentence on what the role mainly does, one evidence-backed sentence on why it fits this candidate, and at most one decision-critical point to confirm.
 - Translate internal `风险理由` into neutral candidate language such as `需要确认：上海线下办公，想先确认您是否考虑`。Omit low-value gaps instead of making the candidate read an audit report.
 - End with one low-effort action: ask the candidate to reply with job numbers; promise the full JD/company details only for the selected numbers.
@@ -82,6 +82,7 @@ This section is mandatory for `candidate_to_jobs`. After the internal ranking, p
 - `把简历发我` or any request to resend materials already received.
 - Unverified salary, location, financing, company claims, or exaggerated fit.
 - Markdown tables, quote blocks, nested lists, or five repeated greetings and closings.
+- Any single copy-ready message longer than 4,000 characters.
 
 ### Copy-ready template
 
